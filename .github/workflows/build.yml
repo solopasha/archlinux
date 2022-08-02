@@ -1,0 +1,54 @@
+name: build
+
+on:
+  push:
+  schedule:
+    - cron: "0 0 1 * *"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux
+      options: --privileged
+      volumes:
+        - /sys/fs/cgroup:/sys/fs/cgroup
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Build iso
+        run: |
+          image_name="archlinux-$(date +%Y.%m.%d)-x86_64.iso"
+          pacman-key --init
+          pacman-key --populate
+          pacman -Syy archlinux-keyring --noconfirm
+          pacman -Syu archiso reflector --noconfirm --needed
+          reflector --verbose --threads 2 --protocol https --latest 10 --sort rate --save /etc/pacman.d/mirrorlist
+          echo "build iso"
+          mkarchiso -v -w ./work -o /out /usr/share/archiso/configs/releng
+          
+          echo "create SHA 256"
+          sha256sum "/out/${image_name}" > "/out/${image_name}.sha256"
+          echo "BUILD_TAG=$(date +%Y.%m.%d)" >> $GITHUB_ENV
+          echo "image_name=$image_name" >> $GITHUB_ENV
+
+      - name: Env
+        run: |
+          echo "${{ env.BUILD_TAG }}"
+          echo "${{ env.image_name }}"
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ env.BUILD_TAG }}
+          path: /out/*
+
+      - name: Create release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: /out/*
+          name: Arch Linups ${{ env.BUILD_TAG }}
+          tag_name: ${{ env.BUILD_TAG }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
